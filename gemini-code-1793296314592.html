@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmokeShield-IoT — Telemetry & EWS SCADA</title>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --haze:#c8d0c2; --paper:#e6eadf; --peat:#2b2119; --muted:#5b6358; --line:#a9b3a2;
+    --moss:#4d6b36; --amber:#b87a0c; --ember:#d3441c; --river:#9fb4b5; --dark-bg:#1a201c;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:"Source Sans 3",system-ui,sans-serif; background:var(--haze); color:var(--peat); line-height:1.45; min-height:100vh; }
+  body.alarm::after { content:""; position:fixed; inset:0; pointer-events:none; border:6px solid var(--ember); animation:blink 0.8s steps(2) infinite; z-index:50; }
+  @keyframes blink { 50% { opacity:0; } }
+  .wrap { max-width:1180px; margin:0 auto; padding:22px 18px 40px; }
+  .mono { font-family:'JetBrains Mono', monospace; }
+
+  header { display:flex; justify-content:space-between; align-items:flex-end; gap:14px; flex-wrap:wrap; margin-bottom:14px; }
+  h1 { font-family:"Barlow Condensed",sans-serif; font-size:2.5rem; font-weight:700; line-height:1; letter-spacing:.01em; }
+  .sub { color:var(--muted); font-size:.95rem; margin-top:4px; }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; }
+  button { font:inherit; font-weight:600; cursor:pointer; border-radius:4px; padding:7px 13px; border:1.5px solid var(--peat); background:var(--peat); color:var(--paper); font-size:.88rem; }
+  button.ghost { background:transparent; color:var(--peat); }
+  button.on { background:var(--moss); border-color:var(--moss); color:#fff; }
+  button.danger { background:var(--ember); border-color:var(--ember); color:#fff; }
+  button:focus-visible, .mk:focus-visible { outline:3px solid var(--amber); outline-offset:2px; }
+
+  #bar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 16px; border-radius:4px; background:var(--paper); border-left:8px solid var(--moss); }
+  #bar.warn { border-left-color:var(--amber); }
+  #bar.bad { border-left-color:var(--ember); background:var(--ember); color:#fff; }
+  #bar b { font-family:"Barlow Condensed",sans-serif; font-size:1.4rem; font-weight:600; display:block; line-height:1.15; }
+  #bar span { font-size:.92rem; }
+  #bar button { background:#fff; color:var(--ember); border-color:#fff; }
+
+  .grid { display:grid; grid-template-columns:1.3fr 1fr; gap:14px; margin-top:14px; }
+  @media (max-width:880px) { .grid { grid-template-columns:1fr; } }
+  .box { background:var(--paper); border-radius:4px; padding:14px 16px; }
+  h2 { font-family:"Barlow Condensed",sans-serif; font-size:1.3rem; font-weight:600; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+
+  svg.map { width:100%; height:auto; display:block; background:#d2d9ca; border-radius:3px; border:1px solid var(--line); }
+  .mk { cursor:pointer; }
+  .mk circle.dot { fill:var(--c); stroke:#fff; stroke-width:2.5; }
+  .mk text { font-family:"Barlow Condensed",sans-serif; font-size:14px; font-weight:600; fill:var(--peat); text-anchor:middle; }
+  .mk .sel { fill:none; stroke:var(--peat); stroke-width:2; opacity:0; }
+  .mk.isel .sel { opacity:1; }
+  .mk .ring { fill:none; stroke:var(--ember); stroke-width:3; opacity:0; }
+  .mk.hot .ring { animation:ring 1.5s ease-out infinite; }
+  @keyframes ring { 0% { r:10; opacity:.9; } 100% { r:36; opacity:0; } }
+  .s-ok { --c:var(--moss); } .s-warn { --c:var(--amber); } .s-bad { --c:var(--ember); }
+  .puff { fill:#3b3530; opacity:0; }
+  .plume.on .puff { animation:drift 4.5s ease-out infinite; }
+  @keyframes drift { 0% { opacity:0; transform:translate(0,0) scale(.5); } 25% { opacity:.5; } 100% { opacity:0; transform:translate(80px,-65px) scale(2.2); } }
+  @media (prefers-reduced-motion:reduce) { .plume.on .puff, .mk.hot .ring, body.alarm::after { animation:none; } .plume.on .puff { opacity:.35; } }
+  .legend { display:flex; gap:14px; font-size:.82rem; color:var(--muted); margin-top:8px; flex-wrap:wrap; }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:-1px; }
+
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .tab { background:transparent; color:var(--muted); border:1.5px solid var(--line); padding:4px 10px; font-weight:600; font-size:.85rem; border-radius:3px; }
+  .tab[aria-pressed="true"] { background:var(--peat); color:var(--paper); border-color:var(--peat); }
+
+  .badge { font-size:.78rem; font-weight:700; padding:2px 7px; border-radius:3px; text-transform:uppercase; letter-spacing:.03em; }
+  .badge-baik { background:#22c55e; color:#fff; }
+  .badge-sedang { background:#eab308; color:#fff; }
+  .badge-tidak-sehat { background:#f97316; color:#fff; }
+  .badge-sangat-tidak-sehat { background:#ef4444; color:#fff; }
+  .badge-bahaya { background:#7f1d1d; color:#fff; }
+
+  .row { display:grid; grid-template-columns:85px 1fr; gap:2px 10px; align-items:center; padding:7px 0; border-bottom:1px solid var(--line); }
+  .row:last-of-type { border-bottom:0; }
+  .row .v { font-family:"Barlow Condensed",sans-serif; font-size:1.8rem; font-weight:600; line-height:1; grid-column:2; }
+  .row .v small { font-size:.9rem; color:var(--muted); font-weight:500; margin-left:4px; }
+  .row .st { font-size:.82rem; font-weight:600; color:var(--c); grid-column:1; grid-row:1 / span 2; align-self:center; }
+  .track { position:relative; height:7px; background:var(--line); border-radius:2px; grid-column:2; margin-top:3px; }
+  .track i.f { position:absolute; inset:0 auto 0 0; background:var(--c); border-radius:2px; transition:width .4s; }
+  .track i.t { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--peat); opacity:.55; }
+
+  .power { display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-top:12px; font-size:.9rem; padding-top:8px; border-top:1px dashed var(--line); }
+  .power b { font-family:"Barlow Condensed",sans-serif; font-size:1.4rem; font-weight:600; }
+  .bat { flex:1; min-width:100px; height:8px; background:var(--line); border-radius:2px; overflow:hidden; }
+  .bat i { display:block; height:100%; background:var(--moss); transition:width .4s; }
+
+  canvas { width:100%; height:210px; display:block; }
+  table { width:100%; border-collapse:collapse; font-size:.88rem; }
+  th, td { text-align:left; padding:6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  .wide { margin-top:14px; }
+  .table-wrap { overflow-x:auto; }
+  
+  .terminal { background:var(--dark-bg); color:#4ade80; font-family:'JetBrains Mono',monospace; font-size:.78rem; padding:10px 12px; border-radius:4px; height:120px; overflow-y:auto; line-height:1.4; border:1px solid #334155; }
+  .terminal .time { color:#94a3b8; margin-right:6px; }
+  .terminal .topic { color:#38bdf8; margin-right:6px; }
+
+  .sim-panel { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; padding:8px; background:#d9dfd0; border-radius:4px; }
+  .sim-panel span { font-weight:700; font-size:.85rem; align-self:center; margin-right:4px; }
+
+  .note { color:var(--muted); font-size:.8rem; margin-top:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>SmokeShield-IoT</h1>
+      <p class="sub" id="status">Monitoring Kualitas Udara Real-Time & EWS Karhutla · Tim Tidur Nyenyak (ITK)</p>
+    </div>
+    <div class="btns">
+      <button id="sound" type="button" class="ghost">Aktifkan Suara Audio</button>
+      <button id="resetAll" type="button" class="ghost">Reset Normal</button>
+      <button id="toggle" type="button" class="ghost">Jeda</button>
+      <button id="export" type="button" class="ghost">Ekspor CSV</button>
+    </div>
+  </header>
+
+  <!-- Pemicu Simulasi Kebakaran Per Node -->
+  <div class="sim-panel">
+    <span>Simulasi Kebakaran (EWS Trigger):</span>
+    <button id="fireA" type="button" class="danger">Titik A (Karang Joang)</button>
+    <button id="fireB" type="button" class="danger">Titik B (Sepinggan)</button>
+    <button id="fireC" type="button" class="danger">Titik C (TN Kutai)</button>
+    <button id="fireAll" type="button" class="danger" style="background:#7f1d1d">Semua Titik (Massal)</button>
+  </div>
+
+  <section id="bar" style="margin-top:10px" aria-live="assertive"></section>
+
+  <div class="grid">
+    <section class="box">
+      <h2>
+        Peta Sebaran Node Sensor
+        <span class="sub" style="margin:0;font-weight:normal">Kalimantan Timur</span>
+      </h2>
+      <svg class="map" viewBox="0 0 640 400" role="img" aria-label="Peta sebaran node sensor">
+        <g fill="none" stroke="#a9b3a2" stroke-width="1.2">
+          <ellipse cx="330" cy="195" rx="300" ry="175" transform="rotate(-14 330 195)"/>
+          <ellipse cx="325" cy="200" rx="250" ry="145" transform="rotate(-18 325 200)"/>
+          <ellipse cx="320" cy="198" rx="200" ry="115" transform="rotate(-22 320 198)"/>
+          <ellipse cx="315" cy="195" rx="150" ry="85" transform="rotate(-26 315 195)"/>
+        </g>
+        <path d="M-10 320 C110 270 210 350 330 308 S530 238 650 282" fill="none" stroke="#9fb4b5" stroke-width="10" opacity=".7" stroke-linecap="round"/>
+        <g id="plumes"></g>
+        <g id="marks"></g>
+      </svg>
+      <div class="legend">
+        <span><i style="background:var(--moss)"></i>Normal</span>
+        <span><i style="background:var(--amber)"></i>Perlu Dipantau</span>
+        <span><i style="background:var(--ember)"></i>Indikasi Asap (EWS)</span>
+        <span>Klik node untuk detail telemetri</span>
+      </div>
+    </section>
+
+    <section class="box">
+      <h2>
+        <span id="nodeTitle">Node</span>
+        <span id="ispuBadge" class="badge badge-baik">ISPU: BAIK</span>
+      </h2>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:8px" id="nodeCoords">Koordinat: -</div>
+      <div class="tabs" id="nodeTabs"></div>
+      <div id="rows"></div>
+      <div class="power">
+        <div>Panel Surya <b id="e-solar">–</b></div>
+        <div>Baterai LiFePO4 <b id="e-bat">–</b></div>
+        <div id="e-state" style="font-size:.82rem;color:var(--muted)"></div>
+        <div class="bat"><i id="e-bar"></i></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="box wide">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <h2 id="chartTitle">Grafik Telemetri Real-Time</h2>
+      <div class="tabs" id="tabs" style="margin:0"></div>
+    </div>
+    <canvas id="chart" role="img" aria-label="Grafik data sensor terbaru"></canvas>
+  </section>
+
+  <div class="grid" style="margin-top:14px">
+    <section class="box">
+      <h2>Riwayat Peringatan EWS & WhatsApp Bot</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Waktu</th><th>Node</th><th>Kejadian</th><th>Status WA</th></tr></thead>
+          <tbody id="log"><tr><td colspan="4" style="color:var(--muted)">Belum ada peringatan bahaya.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="box">
+      <h2>Live Serial MQTT Stream (/telemetry)</h2>
+      <div id="terminal" class="terminal">
+        <div><span class="time">[00:00:00]</span> <span class="topic">system</span> MQTT Broker Connected: mqtt.smokeshield.itk.ac.id:1883</div>
+      </div>
+    </section>
+  </div>
+
+  <p class="note">Aplikasi SCADA SmokeShield-IoT dirancang untuk pemantauan kualitas udara dan deteksi dini asap karhutla off-grid bertenaga surya. Seluruh parameter disesuaikan dengan standar sensor PMS5003, MQ-7, MQ-135, dan DHT22.</p>
+</div>
+
+<script>
+// Sensor & Node Config
+const SENSORS = [
+  { id:"pm",   name:"PM2.5 (PMS5003)",  unit:"µg/m³", min:0,  max:300, warn:55, bad:150, start:14, fire:285, dir:1,  smoke:true  },
+  { id:"co",   name:"Gas CO (MQ-7)",     unit:"ppm",   min:0,  max:80,  warn:9,  bad:35,  start:3,  fire:54,  dir:1,  smoke:true  },
+  { id:"mq135",name:"AQI Gas (MQ-135)",  unit:"ppm",   min:0,  max:400, warn:100,bad:200, start:35, fire:245, dir:1,  smoke:true  },
+  { id:"temp", name:"Suhu (DHT22)",      unit:"°C",    min:20, max:60,  warn:36, bad:42,  start:30, fire:49,  dir:1,  smoke:true  },
+  { id:"hum",  name:"Kelembapan",        unit:"%",     min:10, max:100, warn:45, bad:30,  start:76, fire:20,  dir:-1, smoke:false }
+];
+
+const NODES = [
+  { id:"A", name:"Node A · Karang Joang ITK", say:"Node A, Karang Joang ITK", comm:"LoRa 915 MHz", bat:88, x:170, y:150, lat:"-1.151200", lng:"116.862400" },
+  { id:"B", name:"Node B · Sepinggan Raya",  say:"Node B, Sepinggan Raya",   comm:"Seluler GSM",  bat:68, x:360, y:240, lat:"-1.265300", lng:"116.892100" },
+  { id:"C", name:"Node C · TN Kutai",        say:"Node C, Taman Nasional Kutai", comm:"Seluler GSM", bat:94, x:510, y:110, lat:"0.224100",  lng:"117.271800" }
+];
+
+const PANEL_WATT = 10, LOAD_WATT = 1.6, MAX_POINTS = 40;
+const LABEL = { ok:"Normal", warn:"Pantau", bad:"Bahaya" };
+
+NODES.forEach(n => {
+  n.data = {}; SENSORS.forEach(s => n.data[s.id] = [s.start]);
+  n.fireTicks = 0; n.level = "ok"; n.solar = 0;
+});
+
+let active = "A", activeSensor = "pm", running = true;
+const node = () => NODES.find(n => n.id === active);
+const $ = id => document.getElementById(id);
+
+function getISPU(pm25) {
+  if (pm25 <= 15.5) return { val: Math.round((50/15.5)*pm25), label: "ISPU: BAIK", class: "badge-baik" };
+  if (pm25 <= 55.4) return { val: Math.round(51 + (49/39.9)*(pm25-15.6)), label: "ISPU: SEDANG", class: "badge-sedang" };
+  if (pm25 <= 150.4) return { val: Math.round(101 + (99/94.9)*(pm25-55.5)), label: "ISPU: TIDAK SEHAT", class: "badge-tidak-sehat" };
+  if (pm25 <= 250.4) return { val: Math.round(201 + (99/99.9)*(pm25-150.5)), label: "ISPU: SANGAT TIDAK SEHAT", class: "badge-sangat-tidak-sehat" };
+  return { val: Math.round(300 + (pm25 - 250.5)), label: "ISPU: BERBAHAYA", class: "badge-bahaya" };
+}
+
+function readNode(n) {
+  SENSORS.forEach(s => {
+    const arr = n.data[s.id], last = arr.at(-1);
+    const target = n.fireTicks > 0 ? s.fire : s.start;
+    const noise = (Math.random() - .5) * (s.max - s.min) * 0.025;
+    arr.push(Math.min(s.max, Math.max(s.min, +(last + (target - last) * 0.16 + noise).toFixed(1))));
+    if (arr.length > MAX_POINTS) arr.shift();
+  });
+  if (n.fireTicks > 0) n.fireTicks--;
+  const d = new Date(), h = d.getHours() + d.getMinutes() / 60;
+  n.solar = +(PANEL_WATT * Math.max(0, Math.sin(Math.PI * (h - 6) / 12)) * (0.65 + Math.random() * 0.35)).toFixed(1);
+  n.bat = Math.min(100, Math.max(5, +(n.bat + (n.solar - LOAD_WATT) * 0.03).toFixed(0)));
+}
+
+function levelOf(s, v) {
+  if (s.dir === 1) return v >= s.bad ? "bad" : v >= s.warn ? "warn" : "ok";
+  return v <= s.bad ? "bad" : v <= s.warn ? "warn" : "ok";
+}
+
+function nodeStatus(n) {
+  const hit = SENSORS.filter(s => s.smoke && levelOf(s, n.data[s.id].at(-1)) !== "ok");
+  if (hit.length >= 2) return { level:"bad", detail:`PM2.5 & Gas CO melebihi batas bahaya (${hit.map(s => s.name.split(" ")[0]).join(", ")})` };
+  if (hit.length === 1) return { level:"warn", detail:`Peningkatan ${hit[0].name.split(" ")[0]}` };
+  return { level:"ok", detail:"Parameter lingkungan normal" };
+}
+
+let audioOn = false, ctx = null, osc = null, sweep = null, silenced = false;
+function startSiren() {
+  if (osc || !audioOn) return;
+  osc = ctx.createOscillator(); const g = ctx.createGain();
+  osc.type = "sawtooth"; g.gain.value = 0.12;
+  osc.connect(g).connect(ctx.destination); osc.start();
+  let hi = false;
+  const step = () => { if (osc) { osc.frequency.linearRampToValueAtTime(hi ? 800 : 1200, ctx.currentTime + 0.3); hi = !hi; } };
+  osc.frequency.value = 800; step(); sweep = setInterval(step, 350);
+}
+
+function stopSiren() {
+  if (!osc) return;
+  clearInterval(sweep); try { osc.stop(); } catch (e) {} osc = null;
+}
+
+function speak(text) {
+  if (!audioOn || !("speechSynthesis" in window)) return;
+  const u = new SpeechSynthesisUtterance(text); u.lang = "id-ID"; u.rate = 0.95; u.pitch = 1.0;
+  speechSynthesis.cancel(); speechSynthesis.speak(u);
+}
+
+$("sound").onclick = e => {
+  audioOn = !audioOn;
+  if (audioOn) { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); ctx.resume(); speak("Suara audio sirine dan notifikasi aktif"); }
+  else { stopSiren(); speechSynthesis.cancel(); }
+  e.target.textContent = audioOn ? "Suara Audio Aktif" : "Aktifkan Suara Audio";
+  e.target.className = audioOn ? "on" : "ghost";
+};
+
+const NS = "http://www.w3.org/2000/svg";
+NODES.forEach(n => {
+  const p = document.createElementNS(NS, "g"); p.setAttribute("class", "plume"); p.id = "pl-" + n.id;
+  [[0,0,16,0],[6,-4,22,.8],[-4,-8,18,1.6],[8,-10,26,2.4],[0,-14,20,3.2]].forEach(([dx,dy,r,delay]) => {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("class", "puff"); c.setAttribute("cx", n.x + dx); c.setAttribute("cy", n.y + dy); c.setAttribute("r", r);
+    c.style.animationDelay = delay + "s"; p.appendChild(c);
+  });
+  $("plumes").appendChild(p);
+
+  const g = document.createElementNS(NS, "g"); g.id = "mk-" + n.id; g.setAttribute("tabindex", 0); g.setAttribute("role", "button");
+  g.setAttribute("aria-label", n.name);
+  g.innerHTML = `<circle class="ring" cx="${n.x}" cy="${n.y}" r="10"/><circle class="sel" cx="${n.x}" cy="${n.y}" r="17"/>
+    <circle class="dot" cx="${n.x}" cy="${n.y}" r="9"/><text x="${n.x}" y="${n.y + 32}">${n.name.split(" · ")[1]}</text>`;
+  g.onclick = () => { active = n.id; render(); };
+  $("marks").appendChild(g);
+
+  const b = document.createElement("button");
+  b.className = "tab"; b.type = "button"; b.id = "nt-" + n.id; b.textContent = n.id;
+  b.setAttribute("aria-label", n.name); b.onclick = () => { active = n.id; render(); };
+  $("nodeTabs").appendChild(b);
+});
+
+SENSORS.forEach(s => {
+  $("rows").insertAdjacentHTML("beforeend",
+    `<div class="row" id="r-${s.id}"><span class="st" id="rs-${s.id}"></span>
+     <div class="v"><span id="v-${s.id}">–</span><small>${s.unit} · ${s.name}</small></div>
+     <div class="track"><i class="f" id="f-${s.id}"></i>
+     <i class="t" style="left:${(s.warn - s.min) / (s.max - s.min) * 100}%"></i>
+     <i class="t" style="left:${(s.bad - s.min) / (s.max - s.min) * 100}%"></i></div></div>`);
+  const b = document.createElement("button");
+  b.className = "tab"; b.type = "button"; b.textContent = s.name.split(" ")[0]; b.dataset.id = s.id;
+  b.onclick = () => { activeSensor = s.id; render(); };
+  $("tabs").appendChild(b);
+});
+
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+function drawChart() {
+  const s = SENSORS.find(x => x.id === activeSensor), d = node().data[s.id];
+  $("chartTitle").textContent = `${s.name} (${s.unit}) — ${node().name}`;
+  const c = $("chart"), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext("2d"); g.scale(dpr, dpr);
+  const pad = { l:40, r:8, t:8, b:8 };
+  const x = i => pad.l + (i / (MAX_POINTS - 1)) * (W - pad.l - pad.r);
+  const y = v => pad.t + (1 - (v - s.min) / (s.max - s.min)) * (H - pad.t - pad.b);
+  g.font = "12px 'Source Sans 3',sans-serif"; g.lineWidth = 1;
+  
+  for (let i = 0; i <= 4; i++) {
+    const v = s.min + (s.max - s.min) * i / 4, yy = y(v);
+    g.strokeStyle = css("--line"); g.beginPath(); g.moveTo(pad.l, yy); g.lineTo(W - pad.r, yy); g.stroke();
+    g.fillStyle = css("--muted"); g.fillText(v.toFixed(0), 4, yy + 4);
+  }
+  [[s.warn, "--amber"], [s.bad, "--ember"]].forEach(([v, col]) => {
+    g.setLineDash([5, 4]); g.strokeStyle = css(col);
+    g.beginPath(); g.moveTo(pad.l, y(v)); g.lineTo(W - pad.r, y(v)); g.stroke();
+  });
+  g.setLineDash([]); g.strokeStyle = css("--peat"); g.lineWidth = 2.4; g.lineJoin = "round"; g.beginPath();
+  d.forEach((v, i) => { const px = x(i + (MAX_POINTS - d.length)); i ? g.lineTo(px, y(v)) : g.moveTo(px, y(v)); });
+  g.stroke();
+}
+
+function render() {
+  const n = node();
+  const bads = NODES.filter(m => m.level === "bad"), warns = NODES.filter(m => m.level === "warn");
+  const bar = $("bar");
+  
+  if (bads.length) {
+    bar.className = "bad";
+    bar.innerHTML = `<div><b>DETEKSI BAHAYA KEBAKARAN: ${bads.map(m => m.say).join("; ")}</b><span>${nodeStatus(bads[0]).detail}. Rekomendasi: Kirim tim verifikasi lapangan BPBD.</span></div>` +
+      (silenced ? `<span>Alarm dibungkam</span>` : `<button id="mute" type="button">Bungkam Alarm</button>`);
+    if ($("mute")) $("mute").onclick = () => { silenced = true; stopSiren(); render(); };
+  } else if (warns.length) {
+    bar.className = "warn";
+    bar.innerHTML = `<div><b>PERLU DIPANTAU: ${warns.map(m => m.say).join("; ")}</b><span>${nodeStatus(warns[0]).detail}</span></div>`;
+  } else {
+    bar.className = "";
+    bar.innerHTML = `<div><b>SEMUA NODE NORMAL</b><span>Sistem aktif memantau ${NODES.length} titik wilayah Kalimantan Timur</span></div>`;
+  }
+  document.body.classList.toggle("alarm", bads.length > 0 && !silenced);
+
+  NODES.forEach(m => {
+    const k = "s-" + m.level;
+    $("mk-" + m.id).setAttribute("class", `mk ${k}${m.id === active ? " isel" : ""}${m.level === "bad" ? " hot" : ""}`);
+    $("pl-" + m.id).setAttribute("class", "plume" + (m.level === "bad" ? " on" : ""));
+    $("nt-" + m.id).setAttribute("aria-pressed", m.id === active);
+  });
+
+  $("nodeTitle").textContent = `${n.name} (${n.comm})`;
+  $("nodeCoords").textContent = `Koordinat Presisi: ${n.lat}, ${n.lng}`;
+  const ispu = getISPU(n.data["pm"].at(-1));
+  const ispuBadge = $("ispuBadge");
+  ispuBadge.className = `badge ${ispu.class}`;
+  ispuBadge.textContent = `${ispu.label} (${ispu.val})`;
+
+  SENSORS.forEach(s => {
+    const v = n.data[s.id].at(-1), lvl = levelOf(s, v), r = $("r-" + s.id);
+    r.className = "row s-" + lvl;
+    $("v-" + s.id).textContent = v.toFixed(1);
+    $("rs-" + s.id).textContent = LABEL[lvl];
+    $("f-" + s.id).style.width = ((v - s.min) / (s.max - s.min) * 100) + "%";
+  });
+
+  $("e-solar").textContent = n.solar.toFixed(1) + " W";
+  $("e-bat").textContent = n.bat.toFixed(0) + "% · " + (3.3 + n.bat / 100 * 0.9).toFixed(2) + " V";
+  $("e-state").textContent = n.solar > LOAD_WATT ? "Solar PV mengisi daya" : "Menggunakan daya baterai";
+  $("e-bar").style.width = n.bat + "%";
+  $("e-bar").style.background = n.bat < 20 ? css("--ember") : n.bat < 40 ? css("--amber") : css("--moss");
+
+  [...$("tabs").children].forEach(t => t.setAttribute("aria-pressed", t.dataset.id === activeSensor));
+  drawChart();
+}
+
+function addLog(n, text, waStatus) {
+  const body = $("log");
+  if (body.querySelector("td[colspan]")) body.innerHTML = "";
+  body.insertAdjacentHTML("afterbegin", `<tr><td>${new Date().toLocaleTimeString("id-ID")}</td><td><b>${n.name.split(" · ")[0]}</b></td><td>${text}</td><td><span class="mono" style="color:${waStatus==='SENT'?'#22c55e':'#94a3b8'}">${waStatus}</span></td></tr>`);
+  while (body.children.length > 8) body.lastChild.remove();
+}
+
+function appendTerminal(topic, payload) {
+  const term = $("terminal");
+  const time = new Date().toLocaleTimeString("id-ID");
+  const div = document.createElement("div");
+  div.innerHTML = `<span class="time">[${time}]</span> <span class="topic">${topic}</span> ${payload}`;
+  term.appendChild(div);
+  term.scrollTop = term.scrollHeight;
+  while (term.children.length > 30) term.firstChild.remove();
+}
+
+function triggerFire(targetNodeId) {
+  const n = NODES.find(x => x.id === targetNodeId);
+  if (n) {
+    active = n.id;
+    n.fireTicks = 35;
+    render();
+  }
+}
+
+function tick() {
+  if (!running) return;
+  NODES.forEach(n => {
+    readNode(n);
+    const st = nodeStatus(n);
+    if (st.level !== n.level) {
+      if (st.level === "bad") { 
+        addLog(n, `Deteksi Asap Kebakaran (EWS: ${n.lat}, ${n.lng})`, "SENT (WA Bot)"); 
+        speak(`Peringatan bahaya! Terdeteksi indikasi kebakaran di ${n.say}, koordinat ${n.lat}, ${n.lng}`); 
+        silenced = false; 
+      }
+      else if (st.level === "warn" && n.level === "ok") addLog(n, "Peningkatan Parameter Lingkungan", "STANDBY");
+      else if (st.level === "ok") addLog(n, "Kondisi Kembali Normal", "N/A");
+    }
+    n.level = st.level;
+
+    if (n.id === active) {
+      const payload = JSON.stringify({ node: n.id, lat: n.lat, lng: n.lng, pm25: n.data.pm.at(-1), co: n.data.co.at(-1), temp: n.data.temp.at(-1), solar_w: n.solar });
+      appendTerminal(`/smokeshield/${n.id.toLowerCase()}/telemetry`, payload);
+    }
+  });
+
+  const anyBad = NODES.some(n => n.level === "bad");
+  if (!anyBad) silenced = false;
+  if (anyBad && !silenced) startSiren(); else stopSiren();
+  render();
+}
+
+// Handler Tombol Simulasi
+$("fireA").onclick = () => triggerFire("A");
+$("fireB").onclick = () => triggerFire("B");
+$("fireC").onclick = () => triggerFire("C");
+$("fireAll").onclick = () => {
+  NODES.forEach(n => n.fireTicks = 35);
+  render();
+};
+
+$("resetAll").onclick = () => {
+  NODES.forEach(n => { n.fireTicks = 0; });
+  silenced = true;
+  stopSiren();
+  render();
+};
+
+$("toggle").onclick = e => {
+  running = !running;
+  if (!running) stopSiren();
+  e.target.textContent = running ? "Jeda" : "Lanjutkan";
+  $("status").textContent = running ? "Monitoring Kualitas Udara Real-Time & EWS Karhutla · Tim Tidur Nyenyak (ITK)" : "Sistem Dijeda";
+};
+
+$("export").onclick = () => {
+  let csv = "Timestamp,Node,Latitude,Longitude,PM2.5,CO,MQ135,Suhu,Kelembapan,Solar_Watt,Battery_Pct\n";
+  const now = new Date().toISOString();
+  NODES.forEach(n => {
+    csv += `${now},${n.name},${n.lat},${n.lng},${n.data.pm.at(-1)},${n.data.co.at(-1)},${n.data.mq135.at(-1)},${n.data.temp.at(-1)},${n.data.hum.at(-1)},${n.solar},${n.bat}\n`;
+  });
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `SmokeShield_Telemetry_${Date.now()}.csv`;
+  a.click();
+};
+
+window.addEventListener("resize", drawChart);
+tick(); setInterval(tick, 2000);
+</script>
+</body>
+</html>
